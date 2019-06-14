@@ -73,6 +73,8 @@ def get_input_fn(mode, tfrecord_pattern, batch_size):
     if mode != tf.estimator.ModeKeys.PREDICT:
       labels = parsed_features["class_index"]
     parsed_features["ink"] = tf.sparse_tensor_to_dense(parsed_features["ink"])
+    # Reshape ink here so we don't need to use params.batch_size in model_fn.
+    parsed_features["ink"] = tf.reshape(parsed_features["ink"], [-1, 3])
     return parsed_features, labels
 
   def _input_fn():
@@ -97,7 +99,7 @@ def get_input_fn(mode, tfrecord_pattern, batch_size):
         num_parallel_calls=10)
     dataset = dataset.prefetch(10000)
     if mode == tf.estimator.ModeKeys.TRAIN:
-      dataset = dataset.shuffle(buffer_size=1000000)
+      dataset = dataset.shuffle(buffer_size=1000)
     # Our inputs are variable length, so pad them.
     dataset = dataset.padded_batch(
         batch_size, padded_shapes=dataset.output_shapes)
@@ -128,6 +130,10 @@ def model_fn(features, labels, mode, params):
     ModelFnOps for Estimator API.
   """
 
+
+  # FIXME:  Deploying to AI Platform Prediction requires the outer dimension for outputs to be unknown.
+
+
   def _get_input_tensors(features, labels):
     """Converts the input dict into inks, lengths, and labels tensors."""
     # features[ink] is a sparse tensor that is [8, batch_maxlen, 3]
@@ -135,9 +141,13 @@ def model_fn(features, labels, mode, params):
     # shapes is [batchsize, 2]
     shapes = features["shape"]
     # lengths will be [batch_size]
-    lengths = tf.squeeze(
-        tf.slice(shapes, begin=[0, 0], size=[params.batch_size, 1]))
-    inks = tf.reshape(features["ink"], [params.batch_size, -1, 3])
+    # lengths = tf.squeeze(
+    #     tf.slice(shapes, begin=[0, 0], size=[params.batch_size, 1]))
+    lengths = shapes[:, 0]
+
+    # move reshape to input_fn
+    # inks = tf.reshape(features["ink"], [params.batch_size, -1, 3])
+    inks = features['ink']
     if labels is not None:
       labels = tf.squeeze(labels)
     return inks, lengths, labels
@@ -302,9 +312,12 @@ def main(unused_args):
   # Export as saved model
   import os
   def serving_input_receiver_fn():
-    features = {
-      'ink': tf.placeholder(dtype=tf.float32, shape=[None, 64, 3]),
-      'shape': tf.placeholder(dtype=tf.int64, shape=[None, 2])
+    # Not keeping dtype and shape as the tfrecord dataset means the requester needs to reshape properly.
+    receiver_tensors = {
+      'ink': tf.placeholder(dtype=tf.float32, shape=[None, None, 3]),
+      'shape': tf.placeholder(dtype=tf.int64, shape=[None, 2]),
+      # Added for using AI Platform prediction.
+      'key': tf.placeholder(dtype=tf.int64, shape=[None,])
     }
     receiver_tensors = features
     return tf.estimator.export.ServingInputReceiver(features, receiver_tensors)

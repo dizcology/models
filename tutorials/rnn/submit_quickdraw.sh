@@ -42,4 +42,8 @@ gcloud beta ai-platform jobs submit training $JOB_NAME \
     --eval_data=$EVAL_DATA \
     --classes_file=$CLASSES_FILE \
     --model_dir=$JOB_DIR \
-    --cell_type=cudnn_lstm
+    --cell_type=lstm \
+    --steps=100
+
+# There is a bug in TF that causes the saved_model fails to be restored if using cudnn_lstm:
+# https://github.com/tensorflow/tensorflow/issues/23898
