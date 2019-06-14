@@ -42,5 +42,4 @@ gcloud beta ai-platform jobs submit training $JOB_NAME \
     --eval_data=$EVAL_DATA \
     --classes_file=$CLASSES_FILE \
     --model_dir=$JOB_DIR \
-    --cell_type=cudnn_lstm \
-    --steps=1000
+    --cell_type=cudnn_lstm

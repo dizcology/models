@@ -97,7 +97,7 @@ def get_input_fn(mode, tfrecord_pattern, batch_size):
         num_parallel_calls=10)
     dataset = dataset.prefetch(10000)
     if mode == tf.estimator.ModeKeys.TRAIN:
-      dataset = dataset.shuffle(buffer_size=1000)
+      dataset = dataset.shuffle(buffer_size=1000000)
     # Our inputs are variable length, so pad them.
     dataset = dataset.padded_batch(
         batch_size, padded_shapes=dataset.output_shapes)
