@@ -97,7 +97,7 @@ def get_input_fn(mode, tfrecord_pattern, batch_size):
         num_parallel_calls=10)
     dataset = dataset.prefetch(10000)
     if mode == tf.estimator.ModeKeys.TRAIN:
-      dataset = dataset.shuffle(buffer_size=1000000)
+      dataset = dataset.shuffle(buffer_size=1000)
     # Our inputs are variable length, so pad them.
     dataset = dataset.padded_batch(
         batch_size, padded_shapes=dataset.output_shapes)
@@ -225,27 +225,37 @@ def model_fn(features, labels, mode, params):
   convolved, lengths = _add_conv_layers(inks, lengths)
   final_state = _add_rnn_layers(convolved, lengths)
   logits = _add_fc_layers(final_state)
-  # Add the loss.
-  cross_entropy = tf.reduce_mean(
-      tf.nn.sparse_softmax_cross_entropy_with_logits(
-          labels=labels, logits=logits))
-  # Add the optimizer.
-  train_op = tf.contrib.layers.optimize_loss(
-      loss=cross_entropy,
-      global_step=tf.train.get_global_step(),
-      learning_rate=params.learning_rate,
-      optimizer="Adam",
-      # some gradient clipping stabilizes training in the beginning.
-      clip_gradients=params.gradient_clipping_norm,
-      summaries=["learning_rate", "loss", "gradients", "gradient_norm"])
+
   # Compute current predictions.
   predictions = tf.argmax(logits, axis=1)
+
+  # Added to allow the predict mode
+  if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
+    # Add the loss.
+    cross_entropy = tf.reduce_mean(
+        tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=labels, logits=logits))
+    # Add the optimizer.
+    train_op = tf.contrib.layers.optimize_loss(
+        loss=cross_entropy,
+        global_step=tf.train.get_global_step(),
+        learning_rate=params.learning_rate,
+        optimizer="Adam",
+        # some gradient clipping stabilizes training in the beginning.
+        clip_gradients=params.gradient_clipping_norm,
+        summaries=["learning_rate", "loss", "gradients", "gradient_norm"])
+    eval_metric_ops = {"accuracy": tf.metrics.accuracy(labels, predictions)}
+  else:
+    cross_entropy = None
+    train_op = None
+    eval_metric_ops = None
+
   return tf.estimator.EstimatorSpec(
       mode=mode,
       predictions={"logits": logits, "predictions": predictions},
       loss=cross_entropy,
       train_op=train_op,
-      eval_metric_ops={"accuracy": tf.metrics.accuracy(labels, predictions)})
+      eval_metric_ops=eval_metric_ops)
 
 
 def create_estimator_and_specs(run_config):
@@ -288,6 +298,18 @@ def main(unused_args):
           save_checkpoints_secs=300,
           save_summary_steps=100))
   tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+
+  # Export as saved model
+  import os
+  def serving_input_receiver_fn():
+    features = {
+      'ink': tf.placeholder(dtype=tf.float32, shape=[None, 64, 3]),
+      'shape': tf.placeholder(dtype=tf.int64, shape=[None, 2])
+    }
+    receiver_tensors = features
+    return tf.estimator.export.ServingInputReceiver(features, receiver_tensors)
+
+  estimator.export_saved_model(os.path.join(FLAGS.model_dir, 'saved_model'), serving_input_receiver_fn)
 
 
 if __name__ == "__main__":
